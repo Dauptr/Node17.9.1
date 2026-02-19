@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NEXUS OS v9.0 - Node.js Edition</title>
+  <title>NEXUS OS v9.0 - Fixed</title>
   <script src="https://js.puter.com/v2/"></script>
   <style>
     :root {
@@ -17,7 +17,6 @@
     
     h1 { color: var(--cyan); text-shadow: 0 0 20px var(--cyan); margin-bottom: 10px; font-size: 2.5rem; letter-spacing: 2px; }
     
-    /* Status Bar */
     .status-bar { 
       margin-bottom: 20px; font-size: 0.9rem; font-family: monospace;
       padding: 8px; border-radius: 4px; background: rgba(0,0,0,0.5); border: 1px solid var(--border);
@@ -25,13 +24,11 @@
     .status-ok { color: var(--green); }
     .status-error { color: var(--red); border-color: var(--red); }
 
-    /* Input Area */
     .input-card { background: rgba(0, 20, 30, 0.9); padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px; box-shadow: 0 0 30px rgba(0, 240, 255, 0.1); }
     
     .prompt-input { width: 100%; padding: 15px; background: rgba(0,0,0,0.6); border: 1px solid var(--border); color: #fff; font-family: inherit; font-size: 16px; border-radius: 6px; margin-bottom: 15px; outline: none; }
     .prompt-input:focus { border-color: var(--cyan); box-shadow: 0 0 10px rgba(0, 240, 255, 0.2); }
 
-    /* Buttons */
     .btn-group { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
     button { padding: 12px 24px; border: none; cursor: pointer; font-family: inherit; font-weight: bold; transition: 0.2s; border-radius: 6px; font-size: 14px; }
     button:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -42,7 +39,6 @@
     .btn-secondary { background: transparent; border: 1px solid var(--magenta); color: var(--magenta); }
     .btn-secondary:hover:not(:disabled) { background: rgba(255, 0, 170, 0.1); }
 
-    /* Gallery */
     .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 30px; }
     .gallery-item { aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--magenta); position: relative; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; }
     .gallery-item img { width: 100%; height: 100%; object-fit: cover; }
@@ -66,9 +62,8 @@
   <div class="container">
     <h1>NEXUS AI STUDIO</h1>
     
-    <!-- Status Indicator -->
     <div id="systemStatus" class="status-bar status-error">
-      Checking Local Server Status...
+      Checking System...
     </div>
 
     <div class="input-card">
@@ -88,38 +83,37 @@
   <div class="notification" id="notification"></div>
 
   <script>
-    // --- 1. System Checks ---
+    // --- 1. Helpers ---
     const $ = id => document.getElementById(id);
     const log = msg => { $('debugLog').innerText = msg; console.log(msg); };
-    
+    const notify = (msg, isError = false) => { 
+      const n = $('notification'); 
+      n.innerText = msg; 
+      n.className = isError ? "notification show error" : "notification show";
+      setTimeout(() => n.className = "notification", 4000);
+    };
+
+    // --- 2. System Checks ---
     function checkEnvironment() {
       const statusDiv = $('systemStatus');
       const isLocalServer = (window.location.protocol === 'http:' || window.location.protocol === 'https:');
       
       if (!isLocalServer) {
-        statusDiv.innerHTML = "⚠️ ERROR: Not on Local Server. You are opening this file directly (file://). AI will block requests.";
+        statusDiv.innerHTML = "ERROR: Must run on Local Server (http://localhost)";
         statusDiv.className = "status-bar status-error";
         return false;
       }
       
       if (!window.puter) {
-        statusDiv.innerHTML = "⚠️ ERROR: Puter.js AI Library failed to load. Check internet connection.";
+        statusDiv.innerHTML = "ERROR: AI Library failed to load. Check AdBlocker or Internet.";
         statusDiv.className = "status-bar status-error";
         return false;
       }
 
-      statusDiv.innerHTML = "✓ SYSTEM ONLINE: Local Server Detected & AI Ready.";
+      statusDiv.innerHTML = "✓ SYSTEM ONLINE";
       statusDiv.className = "status-bar status-ok";
       return true;
     }
-
-    // --- 2. UI Helpers ---
-    const notify = (msg, isError = false) => { 
-      const n = $('notification'); 
-      n.innerText = msg; 
-      n.className = isError ? "notification show error" : "notification show";
-      setTimeout(() => n.className = "notification", 3000);
-    };
 
     // --- 3. Particles ---
     function initParticles() {
@@ -139,50 +133,80 @@
       draw();
     }
 
-    // --- 4. Core Generation Logic ---
+    // --- 4. Robust Image Processing ---
     async function processResponse(response) {
-      if (response instanceof Blob) return URL.createObjectURL(response);
-      if (response instanceof Response || (response && typeof response.blob === 'function')) {
-         const blob = await response.blob();
-         return URL.createObjectURL(blob);
+      // 1. If it's already a URL string
+      if (typeof response === 'string' && response.startsWith('http')) {
+        return response;
       }
-      if (typeof response === 'string' && response.startsWith('http')) return response;
-      if (response && response.url) return response.url;
-      throw new Error("Invalid response format");
+
+      // 2. If it's a Fetch Response object
+      if (response instanceof Response || (response && typeof response.blob === 'function')) {
+        // Check if the server actually returned an error (like 500 or 429)
+        if (!response.ok) {
+          // Try to read the error message
+          let errorText = await response.text();
+          throw new Error("Server Error: " + response.status + " - " + errorText);
+        }
+        
+        // Convert to blob safely
+        const blob = await response.blob();
+        if (!blob) throw new Error("Empty image data received.");
+        
+        return URL.createObjectURL(blob);
+      }
+
+      // 3. If it's a raw Blob
+      if (response instanceof Blob) {
+        return URL.createObjectURL(response);
+      }
+
+      // 4. If it's a JSON object with a URL
+      if (response && response.url) {
+        return response.url;
+      }
+
+      // 5. Unknown
+      console.error("Unknown Response:", response);
+      throw new Error("Invalid response format from AI.");
     }
 
     async function createImage(prompt) {
       if (!window.puter) throw new Error("AI not initialized");
+      
+      // Call the API
       const result = await window.puter.ai.txt2img(prompt);
+      
+      // Process the result safely
       return await processResponse(result);
     }
 
     // --- 5. Actions ---
     async function generateSingle() {
-      if (!checkEnvironment()) return; // Block if server not running
+      if (!checkEnvironment()) return;
 
       const prompt = $('promptInput').value.trim();
       if (!prompt) return notify("Please enter a prompt.", true);
 
       const btn = $('createOneBtn');
       btn.disabled = true; btn.innerText = "WORKING...";
-      log("Generating 1 image...");
+      log("Sending request to AI...");
 
       try {
         const url = await createImage(prompt);
-        addImageToGallery(url, false);
+        addImageToGallery(url);
         notify("Image Created");
         log("Success.");
       } catch (e) {
-        log("Error: " + e.message);
-        notify("Failed to generate", true);
+        log("Error: " + e.message); // This will now show the real error
+        notify("Failed (see log)", true);
       } finally {
         btn.disabled = false; btn.innerText = "CREATE (1)";
       }
     }
 
     async function generateAll() {
-      if (!checkEnvironment()) return; // Block if server not running
+      if (!checkEnvironment()) return;
 
       const prompt = $('promptInput').value.trim();
       if (!prompt) return notify("Please enter a prompt.", true);
@@ -194,21 +218,22 @@
       const placeholders = [addImageToGallery(null, true), addImageToGallery(null, true), addImageToGallery(null, true)];
 
       try {
+        // Generate 3 at once
         const promises = [
-          createImage(prompt).catch(e => null), 
-          createImage(prompt + ", variation").catch(e => null), 
-          createImage(prompt + ", detailed").catch(e => null)
+          createImage(prompt).catch(e => ({error: e.message})), 
+          createImage(prompt + ", variation").catch(e => ({error: e.message})), 
+          createImage(prompt + ", detailed").catch(e => ({error: e.message}))
         ];
 
         const results = await Promise.all(promises);
 
-        results.forEach((url, index) => {
-          if (url) updateGalleryItem(placeholders[index], url);
-          else updateGalleryItem(placeholders[index], null, true);
+        results.forEach((res, index) => {
+          if (typeof res === 'string') updateGalleryItem(placeholders[index], res);
+          else updateGalleryItem(placeholders[index], null, true); // Show failed
         });
 
         notify("Batch Complete");
-        log("Generated 3 images.");
+        log("Finished batch generation.");
       } catch (e) {
         log("Batch Error: " + e.message);
         notify("Batch Failed", true);
