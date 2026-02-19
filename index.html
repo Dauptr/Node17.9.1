@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEXUS OS v9.0 - Node.js Edition</title>
+  <script src="https://js.puter.com/v2/"></script>
+  <style>
+    :root {
+      --cyan: #00f0ff; --magenta: #ff00aa; --green: #00ff88; --bg: #000001;
+      --border: rgba(0, 240, 255, 0.3); --red: #ff4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Courier New', monospace; background: var(--bg); color: #e5e7eb; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    
+    .container { width: 100%; max-width: 900px; padding: 20px; text-align: center; z-index: 2; }
+    
+    h1 { color: var(--cyan); text-shadow: 0 0 20px var(--cyan); margin-bottom: 10px; font-size: 2.5rem; letter-spacing: 2px; }
+    
+    /* Status Bar */
+    .status-bar { 
+      margin-bottom: 20px; font-size: 0.9rem; font-family: monospace;
+      padding: 8px; border-radius: 4px; background: rgba(0,0,0,0.5); border: 1px solid var(--border);
+    }
+    .status-ok { color: var(--green); }
+    .status-error { color: var(--red); border-color: var(--red); }
+
+    /* Input Area */
+    .input-card { background: rgba(0, 20, 30, 0.9); padding: 20px; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px; box-shadow: 0 0 30px rgba(0, 240, 255, 0.1); }
+    
+    .prompt-input { width: 100%; padding: 15px; background: rgba(0,0,0,0.6); border: 1px solid var(--border); color: #fff; font-family: inherit; font-size: 16px; border-radius: 6px; margin-bottom: 15px; outline: none; }
+    .prompt-input:focus { border-color: var(--cyan); box-shadow: 0 0 10px rgba(0, 240, 255, 0.2); }
+
+    /* Buttons */
+    .btn-group { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    button { padding: 12px 24px; border: none; cursor: pointer; font-family: inherit; font-weight: bold; transition: 0.2s; border-radius: 6px; font-size: 14px; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    
+    .btn-primary { background: linear-gradient(135deg, var(--cyan), #00a0cc); color: #000; }
+    .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0, 240, 255, 0.4); }
+    
+    .btn-secondary { background: transparent; border: 1px solid var(--magenta); color: var(--magenta); }
+    .btn-secondary:hover:not(:disabled) { background: rgba(255, 0, 170, 0.1); }
+
+    /* Gallery */
+    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 30px; }
+    .gallery-item { aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 1px solid var(--magenta); position: relative; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; }
+    .gallery-item img { width: 100%; height: 100%; object-fit: cover; }
+    .gallery-item.loading { border-style: dashed; animation: pulse 2s infinite; }
+    .gallery-item.loading::after { content: "GENERATING..."; color: var(--cyan); font-size: 12px; }
+
+    .debug-log { background: rgba(0, 5, 10, 0.9); border: 1px solid #333; padding: 10px; margin-top: 20px; font-size: 12px; color: #888; text-align: left; min-height: 40px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; }
+
+    .notification { position: fixed; top: 20px; right: 20px; background: var(--green); color: #000; padding: 10px 20px; border-radius: 4px; font-weight: bold; opacity: 0; transition: 0.3s; z-index: 100; }
+    .notification.show { opacity: 1; }
+    .notification.error { background: var(--red); color: #fff; }
+
+    @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+    #particles { position: fixed; inset: 0; pointer-events: none; z-index: 1; }
+  </style>
+</head>
+<body>
+  <canvas id="particles"></canvas>
+
+  <div class="container">
+    <h1>NEXUS AI STUDIO</h1>
+    
+    <!-- Status Indicator -->
+    <div id="systemStatus" class="status-bar status-error">
+      Checking Local Server Status...
+    </div>
+
+    <div class="input-card">
+      <input type="text" id="promptInput" class="prompt-input" placeholder="Enter prompt (e.g. Futuristic city)">
+      
+      <div class="btn-group">
+        <button id="createOneBtn" class="btn-primary" onclick="generateSingle()">CREATE (1)</button>
+        <button id="createAllBtn" class="btn-secondary" onclick="generateAll()">CREATE ALL (3)</button>
+      </div>
+    </div>
+
+    <div class="gallery" id="gallery"></div>
+
+    <div class="debug-log" id="debugLog">Initializing...</div>
+  </div>
+
+  <div class="notification" id="notification"></div>
+
+  <script>
+    // --- 1. System Checks ---
+    const $ = id => document.getElementById(id);
+    const log = msg => { $('debugLog').innerText = msg; console.log(msg); };
+    
+    function checkEnvironment() {
+      const statusDiv = $('systemStatus');
+      const isLocalServer = (window.location.protocol === 'http:' || window.location.protocol === 'https:');
+      
+      if (!isLocalServer) {
+        statusDiv.innerHTML = "⚠️ ERROR: Not on Local Server. You are opening this file directly (file://). AI will block requests.";
+        statusDiv.className = "status-bar status-error";
+        return false;
+      }
+      
+      if (!window.puter) {
+        statusDiv.innerHTML = "⚠️ ERROR: Puter.js AI Library failed to load. Check internet connection.";
+        statusDiv.className = "status-bar status-error";
+        return false;
+      }
+
+      statusDiv.innerHTML = "✓ SYSTEM ONLINE: Local Server Detected & AI Ready.";
+      statusDiv.className = "status-bar status-ok";
+      return true;
+    }
+
+    // --- 2. UI Helpers ---
+    const notify = (msg, isError = false) => { 
+      const n = $('notification'); 
+      n.innerText = msg; 
+      n.className = isError ? "notification show error" : "notification show";
+      setTimeout(() => n.className = "notification", 3000);
+    };
+
+    // --- 3. Particles ---
+    function initParticles() {
+      const canvas = $('particles'); const ctx = canvas.getContext('2d');
+      let w = canvas.width = innerWidth, h = canvas.height = innerHeight;
+      const particles = Array.from({length: 50}, () => ({x:Math.random()*w, y:Math.random()*h, r:Math.random()*2, dx:(Math.random()-0.5)*.5, dy:(Math.random()-0.5)*.5}));
+      function draw() {
+        ctx.fillStyle = 'rgba(0, 0, 1, 0.2)'; ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = '#00f0ff';
+        particles.forEach(p => {
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+          p.x += p.dx; p.y += p.dy;
+          if(p.x < 0 || p.x > w) p.dx *= -1; if(p.y < 0 || p.y > h) p.dy *= -1;
+        });
+        requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
+    // --- 4. Core Generation Logic ---
+    async function processResponse(response) {
+      if (response instanceof Blob) return URL.createObjectURL(response);
+      if (response instanceof Response || (response && typeof response.blob === 'function')) {
+         const blob = await response.blob();
+         return URL.createObjectURL(blob);
+      }
+      if (typeof response === 'string' && response.startsWith('http')) return response;
+      if (response && response.url) return response.url;
+      throw new Error("Invalid response format");
+    }
+
+    async function createImage(prompt) {
+      if (!window.puter) throw new Error("AI not initialized");
+      const result = await window.puter.ai.txt2img(prompt);
+      return await processResponse(result);
+    }
+
+    // --- 5. Actions ---
+    async function generateSingle() {
+      if (!checkEnvironment()) return; // Block if server not running
+
+      const prompt = $('promptInput').value.trim();
+      if (!prompt) return notify("Please enter a prompt.", true);
+
+      const btn = $('createOneBtn');
+      btn.disabled = true; btn.innerText = "WORKING...";
+      log("Generating 1 image...");
+
+      try {
+        const url = await createImage(prompt);
+        addImageToGallery(url, false);
+        notify("Image Created");
+        log("Success.");
+      } catch (e) {
+        log("Error: " + e.message);
+        notify("Failed to generate", true);
+      } finally {
+        btn.disabled = false; btn.innerText = "CREATE (1)";
+      }
+    }
+
+    async function generateAll() {
+      if (!checkEnvironment()) return; // Block if server not running
+
+      const prompt = $('promptInput').value.trim();
+      if (!prompt) return notify("Please enter a prompt.", true);
+
+      const btn = $('createAllBtn');
+      btn.disabled = true; btn.innerText = "PROCESSING...";
+      log("Generating 3 variations...");
+
+      const placeholders = [addImageToGallery(null, true), addImageToGallery(null, true), addImageToGallery(null, true)];
+
+      try {
+        const promises = [
+          createImage(prompt).catch(e => null), 
+          createImage(prompt + ", variation").catch(e => null), 
+          createImage(prompt + ", detailed").catch(e => null)
+        ];
+
+        const results = await Promise.all(promises);
+
+        results.forEach((url, index) => {
+          if (url) updateGalleryItem(placeholders[index], url);
+          else updateGalleryItem(placeholders[index], null, true);
+        });
+
+        notify("Batch Complete");
+        log("Generated 3 images.");
+      } catch (e) {
+        log("Batch Error: " + e.message);
+        notify("Batch Failed", true);
+      } finally {
+        btn.disabled = false; btn.innerText = "CREATE ALL (3)";
+      }
+    }
+
+    // --- 6. Gallery Management ---
+    function addImageToGallery(url, isLoading = false) {
+      const div = document.createElement('div');
+      div.className = "gallery-item" + (isLoading ? " loading" : "");
+      if (url) {
+        const img = document.createElement('img');
+        img.src = url;
+        div.appendChild(img);
+      }
+      $('gallery').prepend(div);
+      return div;
+    }
+
+    function updateGalleryItem(element, url, error = false) {
+      element.classList.remove("loading");
+      if (error) {
+        element.innerText = "Failed";
+        element.style.color = "red";
+        return;
+      }
+      if (url) {
+        const img = document.createElement('img');
+        img.src = url;
+        element.innerHTML = "";
+        element.appendChild(img);
+      }
+    }
+
+    // --- Init ---
+    initParticles();
+    checkEnvironment();
+
+  </script>
+</body>
+</html>
