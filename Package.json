@@ -1,0 +1,10 @@
+{
+  "name": "nexus-os-local",
+  "version": "1.0.0",
+  "description": "NEXUS OS Local Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}
